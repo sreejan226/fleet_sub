@@ -1,0 +1,30 @@
+fleet:
+  name: generation-fleet
+  instance_type: gen.large
+  capacity:
+    min: 1
+    max: 16
+    warm: 2
+  autoscaler:
+    target_backlog_seconds: 15
+    cooldown_seconds: 20
+    hysteresis: 1
+  image:
+    digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    pinned: true
+  env:
+    keys:
+      - LOG_LEVEL
+      - MODEL_ID
+    value_hashes:
+      LOG_LEVEL: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      MODEL_ID: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    hash: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  tags:
+    env: prod
+    service: generation
+    owner: platform
+  credit_prices:
+    standard: 0.05
+    high: 0.20
+  default_ttl_seconds: 3600

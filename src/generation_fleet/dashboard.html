@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Generation Fleet Control Plane</title>
+  <style>
+    :root { --bg:#0f1419; --card:#1a2332; --fg:#e8eef7; --muted:#9aa8b8; --ok:#3dd68c; --warn:#f5c542; --bad:#ff6b6b; --line:#2a3545; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+    header { padding:16px 24px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
+    h1 { font-size:18px; margin:0; }
+    main { padding:16px 24px; display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; }
+    .wide { grid-column: span 2; }
+    .full { grid-column: 1 / -1; }
+    .n { font-size:28px; font-weight:700; }
+    .muted { color:var(--muted); font-size:12px; }
+    button { background:#2c7be5; color:white; border:0; border-radius:6px; padding:8px 10px; margin:2px; cursor:pointer; }
+    button.alt { background:#3a4a5f; }
+    table { width:100%; border-collapse:collapse; font-size:12px; }
+    td, th { border-bottom:1px solid var(--line); padding:4px 6px; text-align:left; }
+    pre { max-height:220px; overflow:auto; font-size:11px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Generation Fleet Control Plane</h1>
+    <div class="muted">local simulation · no cloud credentials</div>
+  </header>
+  <main>
+    <div class="card"><div class="muted">Queue depth</div><div class="n" id="pending">-</div></div>
+    <div class="card"><div class="muted">Backlog time (s)</div><div class="n" id="backlog">-</div></div>
+    <div class="card"><div class="muted">Throughput (jps)</div><div class="n" id="jps">-</div></div>
+    <div class="card"><div class="muted">Simulated spend</div><div class="n" id="spend">-</div></div>
+    <div class="card"><div class="muted">Running</div><div class="n" id="running">-</div></div>
+    <div class="card"><div class="muted">Booting</div><div class="n" id="booting">-</div></div>
+    <div class="card"><div class="muted">Draining</div><div class="n" id="draining">-</div></div>
+    <div class="card"><div class="muted">Warm pool</div><div class="n" id="warm">-</div></div>
+    <div class="card"><div class="muted">Cost / success</div><div class="n" id="cps">-</div></div>
+    <div class="card"><div class="muted">Success / fail</div><div class="n" id="sf">-</div></div>
+    <div class="card"><div class="muted">SLO alerts</div><div class="n" id="alerts">-</div></div>
+    <div class="card"><div class="muted">Rotation</div><div class="n" id="rot">-</div></div>
+    <div class="card wide">
+      <div class="muted">Controls</div>
+      <button onclick="post('/api/jobs', {work_seconds:0.2})">Submit job</button>
+      <button onclick="post('/api/tick?n=5')">Tick x5</button>
+      <button onclick="post('/api/traces/spike')">Trace spike</button>
+      <button onclick="post('/api/traces/oscillate')">Trace oscillate</button>
+      <button onclick="post('/api/traces/ramp')">Trace ramp</button>
+      <button class="alt" onclick="post('/api/chaos/interrupt')">Chaos interrupt 30%</button>
+      <button class="alt" onclick="post('/api/chaos/open_ssh')">Chaos SSH</button>
+      <button class="alt" onclick="post('/api/chaos/disable_autoscaler')">Stop autoscaler</button>
+      <button onclick="post('/api/fleet/apply')">Reconcile apply</button>
+      <button onclick="load()">Refresh</button>
+    </div>
+    <div class="card wide">
+      <div class="muted">Autoscaler decision</div>
+      <pre id="scaler"></pre>
+    </div>
+    <div class="card wide">
+      <div class="muted">Instances</div>
+      <table><thead><tr><th>id</th><th>state</th><th>type</th><th>env</th><th>util</th></tr></thead><tbody id="inst"></tbody></table>
+    </div>
+    <div class="card wide">
+      <div class="muted">Cost by environment · drift · security · audit</div>
+      <pre id="extra"></pre>
+    </div>
+  </main>
+  <script>
+    async function load() {
+      const s = await (await fetch('/api/state')).json();
+      const q = s.queue || {};
+      document.getElementById('pending').textContent = q.pending ?? 0;
+      document.getElementById('jps').textContent = (q.jps || 0).toFixed(2);
+      document.getElementById('sf').textContent = (q.succeeded||0) + ' / ' + (q.failed||0);
+      const inst = s.instances || [];
+      const by = {};
+      inst.forEach(i => by[i.state] = (by[i.state]||0)+1);
+      document.getElementById('running').textContent = by.RUNNING||0;
+      document.getElementById('booting').textContent = (by.BOOTING||0)+(by.PENDING||0);
+      document.getElementById('draining').textContent = by.DRAINING||0;
+      document.getElementById('warm').textContent = (s.warm||{}).warm_available ?? 0;
+      document.getElementById('spend').textContent = (s.economics.compute_cost||0).toFixed(4);
+      const cps = s.economics.cost_per_successful_generation;
+      document.getElementById('cps').textContent = cps==null ? 'n/a' : cps.toFixed(4);
+      document.getElementById('alerts').textContent = ((s.slo||{}).alerts||[]).length;
+      document.getElementById('rot').textContent = (s.rotation||{}).step || '-';
+      document.getElementById('backlog').textContent = ((s.autoscaler||{}).backlog_time || 0).toFixed(2);
+      document.getElementById('scaler').textContent = JSON.stringify(s.autoscaler, null, 2);
+      document.getElementById('inst').innerHTML = inst.map(i =>
+        `<tr><td>${i.id}</td><td>${i.state}</td><td>${i.instance_type}</td><td>${(i.tags||{}).env||''}</td><td>${(i.utilization||0).toFixed(2)}</td></tr>`
+      ).join('');
+      document.getElementById('extra').textContent = JSON.stringify({
+        tags: s.tags, drift: s.parity, exposure: s.exposure, audit: (s.audit||[]).slice(0,8)
+      }, null, 2);
+    }
+    async function post(url, body) {
+      await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: body?JSON.stringify(body):undefined});
+      load();
+    }
+    load();
+    setInterval(load, 3000);
+  </script>
+</body>
+</html>
